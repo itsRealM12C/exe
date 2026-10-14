@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exe extractor — Windows PE32+ introspection</title>
+<style>
+:root{
+  --bg:#0d1117; --bg2:#161b22; --bg3:#21262d; --border:#30363d;
+  --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --good:#3fb950; --warn:#d29922;
+  --code:#f0883e; --text:#bc8cff; --sig:#ec8cbb; --pdb:#39c5cf; --cfg:#f778ba;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;padding:20px;-webkit-text-size-adjust:100%}
+h1{font-size:24px;margin-bottom:6px}
+h1 .tag{font-size:11px;background:var(--bg3);border:1px solid var(--border);border-radius:99px;padding:2px 10px;vertical-align:middle;margin-left:8px;color:var(--muted)}
+.sub{color:var(--muted);font-size:13px;margin-bottom:18px;max-width:920px}
+.sub b{color:var(--fg);font-weight:600}
+.sub .ex{color:var(--code)}
+#drop{border:2px dashed var(--border);border-radius:12px;padding:44px 20px;text-align:center;cursor:pointer;transition:.15s;background:var(--bg2);-webkit-tap-highlight-color:transparent}
+#drop:active{background:#0f1720}
+#drop.hover{border-color:var(--accent);background:#0f1720}
+#drop .big{font-size:17px;font-weight:600}
+#drop .hint{color:var(--muted);font-size:12px;margin-top:6px}
+input[type=file]{display:none}
+.panel{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-top:16px}
+#fileinfo{display:none;font-family:ui-monospace,Consolas,monospace;font-size:12.5px}
+#fileinfo .k{color:var(--accent)}
+#fileinfo table{border-collapse:collapse;margin-top:6px}
+#fileinfo td{padding:2px 14px 2px 0;white-space:nowrap}
+#fileinfo td.v{color:var(--fg)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:14px}
+.kpi{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+.kpi .v{font-size:18px;font-weight:700;font-family:ui-monospace,monospace}
+.kpi .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+.kpi .v small{font-size:11px;color:var(--muted);font-weight:400}
+#tabs{display:none;gap:6px;margin-top:16px;flex-wrap:wrap}
+.tab{background:var(--bg2);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:9px 14px;cursor:pointer;font-size:14px;font-family:ui-monospace,monospace;-webkit-tap-highlight-color:transparent;min-height:36px}
+.tab:active{background:#1f3a5f}
+.tab:hover{color:var(--accent);border-color:var(--accent)}
+.tab.on{background:#1f3a5f;border-color:var(--accent);color:var(--fg)}
+.tab .n{font-size:10px;color:var(--muted);margin-left:4px}
+#filter{background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:9px 14px;width:100%;min-width:0;font-size:14px;-webkit-appearance:none}
+#filter:focus{outline:none;border-color:var(--accent)}
+button{background:#21262d;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:9px 16px;cursor:pointer;font-size:14px;-webkit-tap-highlight-color:transparent;min-height:36px}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
+button.primary:hover{background:#388bfd}
+#tabBody{margin-top:14px}
+table.t{width:100%;border-collapse:collapse;font-size:12.5px;font-family:ui-monospace,Consolas,monospace}
+table.t th{text-align:left;background:var(--bg3);color:var(--accent);padding:8px 10px;border-bottom:1px solid var(--border);font-weight:600;position:sticky;top:0;cursor:pointer}
+table.t th:hover{color:var(--fg)}
+table.t td{padding:6px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+table.t tr:hover td{background:var(--bg2)}
+table.t td.n{color:var(--muted)}
+table.t td.a{color:var(--accent)}
+table.t td.g{color:var(--good)}
+table.t td.w{color:var(--warn)}
+table.t td.x{color:var(--sig)}
+table.t td.c{color:var(--cfg)}
+.fl{display:inline-block;font-size:10px;padding:1px 6px;border-radius:3px;background:var(--bg3);margin-right:4px;color:var(--muted);font-weight:600}
+.fl.code{background:#1f3850;color:var(--accent)}
+.fl.exec{background:#3a1c2c;color:var(--sig)}
+.fl.read{background:#12291a;color:var(--good)}
+.fl.write{background:#38220f;color:var(--warn)}
+.fl.discard{background:#2d1b4e;color:var(--pdb)}
+.fl.notpage{background:#3a1c2c;color:var(--sig)}
+.searchrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap}
+.prefixes{display:flex;gap:6px;flex-wrap:wrap}
+.chip{background:var(--bg3);border:1px solid var(--border);color:var(--muted);border-radius:99px;padding:5px 12px;font-size:13px;cursor:pointer;font-family:ui-monospace,monospace;-webkit-tap-highlight-color:transparent;min-height:32px;display:inline-block}
+.chip:hover,.chip.on{border-color:var(--accent);color:var(--fg);background:#1f3a5f}
+.chip .n{opacity:.6;margin-left:3px;font-size:10px}
+.xmlbox{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:ui-monospace,monospace;font-size:11.5px;max-height:380px;overflow:auto;white-space:pre;color:#9ecbff}
+.xmlbox a{color:var(--accent);text-decoration:none;border-bottom:1px dotted}
+.hexbox{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:11px;color:var(--muted);white-space:pre;overflow:auto;max-height:300px}
+.cert{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;font-family:ui-monospace,monospace;font-size:11.5px}
+.cert .subject{color:var(--accent);font-weight:600}
+.cert .issuer{color:var(--muted)}
+.cert .dates{color:var(--good)}
+.cert .serial{color:var(--sig);font-size:10.5px}
+table.vt{border-collapse:collapse;font-size:12px;font-family:ui-monospace,monospace;margin-top:8px}
+table.vt td{border:1px solid var(--border);padding:4px 9px}
+table.vt td:first-child{color:var(--sig)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-family:ui-monospace,monospace;font-size:12.5px}
+.kv .k{color:var(--accent);font-weight:600}
+.kv .v{color:var(--fg);word-break:break-all}
+.kv .v a{color:var(--accent)}
+.foot{color:var(--muted);font-size:11.5px;margin-top:26px;text-align:center;max-width:880px;margin-left:auto;margin-right:auto}
+.foot a{color:var(--accent);text-decoration:none}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:r 1s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes r{to{transform:rotate(360deg)}}
+.placeholder{padding:60px;text-align:center;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+
+<h1>exe extractor</h1>
+<div class="sub">
+  A client-side PE introspection tool for Windows executables. Drop a file in and it
+  parses the header, sections, exports, imports, CodeView PDB info (with a pre-built
+  Microsoft Symbol Server URL), embedded Authenticode signature, CFG target list,
+  load config, exception unwind tables, and resources — all in the browser, nothing
+  uploaded.
+</div>
+
+<div id="drop">
+  <div class="big">Drop a file here, or tap to browse</div>
+  <div class="hint">Parsed in memory, never uploaded anywhere</div>
+</div>
+<input type="file" id="file">
+
+<div id="fileinfo" class="panel"></div>
+<div id="tabs"></div>
+<div id="tabBody"></div>
+
+<div class="foot">
+  PE parser · sections · exports · imports · PDB GUID + symbol-server URL ·
+  Authenticode cert chain · CFG targets · load config · exception table ·
+  Format knowledge per <a href="SKILL.md" download>SKILL.md</a>
+</div>
+
+<script>
+'use strict';
+/* ============================================================
+   PE PARSER (PE32 / PE32+ — proven, identical to mun-extractor + x64 support)
+   ============================================================ */
+class PE {
+  constructor(buf){ this.buf=buf; this.u8=new Uint8Array(buf); this.dv=new DataView(buf); this.parse(); }
+  u16(o){return this.dv.getUint16(o,true)}
+  u32(o){return this.dv.getUint32(o,true)}
+  u64(o){return this.dv.getUint32(o,true) | (this.dv.getUint32(o+4,true)>>>0)*0x100000000}
+  u64big(o){return BigInt(this.dv.getUint32(o,true)) | (BigInt(this.dv.getUint32(o+4,true)>>>0) << 32n)}
+  parse(){
+    const d=this.dv;
+    if(this.u16(0)!==0x5A4D) throw new Error('Not a PE file (missing MZ header)');
+    const e_lfanew=this.u32(0x3C);
+    if(d.getUint32(e_lfanew,true)!==0x4550) throw new Error('Missing PE signature');
+    this.coff=e_lfanew+4;
+    this.machine=this.u16(this.coff);
+    this.numSections=this.u16(this.coff+2);
+    this.timestamp=this.u32(this.coff+4);
+    this.characteristics=this.u16(this.coff+18);
+    this.sizeOpt=this.u16(this.coff+16);
+    this.opt=this.coff+20;
+    this.magic=this.u16(this.opt);
+    this.isPE32plus=this.magic===0x20b;
+    // optional header fields (PE32 vs PE32+ differ for some)
+    this.imageBase = this.isPE32plus ? this.u64(this.opt+24) : this.u32(this.opt+28);
+    this.entryPoint = this.u32(this.isPE32plus ? this.opt+16 : this.opt+16);
+    this.subsystem = this.u16(this.isPE32plus ? this.opt+68 : this.opt+68);
+    // data directories
+    const ddOff=this.isPE32plus?this.opt+112:this.opt+96;
+    this.dataDirs=[];
+    const names=['Export','Import','Resource','Exception','Security','BaseReloc','Debug','Arch','GlobalPtr','TLS','LoadConfig','BoundImport','IAT','DelayImport','COM','Reserved'];
+    for(let i=0;i<16;i++)this.dataDirs.push({name:names[i],rva:this.u32(ddOff+i*8),size:this.u32(ddOff+i*8+4)});
+    // sections
+    this.sections=[];
+    const secOff=this.opt+this.sizeOpt;
+    for(let i=0;i<this.numSections;i++){
+      const o=secOff+i*40;
+      const name=String.fromCharCode(...this.u8.slice(o,o+8)).replace(/\0+$/,'');
+      this.sections.push({name,vsize:this.u32(o+8),va:this.u32(o+12),rsize:this.u32(o+16),rptr:this.u32(o+20),chars:this.u32(o+36)});
+    }
+  }
+  rva2off(rva){
+    for(const s of this.sections){
+      const sz=Math.max(s.vsize,s.rsize);
+      if(s.va<=rva && rva<s.va+sz) return s.rptr+(rva-s.va);
+    }
+    return null;
+  }
+  /* ---------- exports ---------- */
+  exports(){
+    const dd=this.dataDirs[0];
+    if(!dd.rva) return [];
+    const base=this.rva2off(dd.rva);
+    if(base==null) return [];
+    const dv=this.dv;
+    const flags=dv.getUint32(base+0,true);
+    const ts=dv.getUint32(base+4,true);
+    const nmTabRVA=dv.getUint32(base+12,true);
+    const ordTabRVA=dv.getUint32(base+16,true);
+    const addrTabRVA=dv.getUint32(base+20,true);
+    const nNames=dv.getUint32(base+24,true);
+    const nOrdBase=dv.getUint32(base+16+4,true)>>>0;
+    // Wait: ordinal base is at base+4+? Let me re-check. Actually:
+    //   DWORD Flags, TimeDateStamp, MajorVersion, MinorVersion, Name RVA,
+    //   OrdinalBase, NumberOfFunctions, NumberOfNames,
+    //   AddressOfFunctions, AddressOfNames, AddressOfNameOrdinals
+    // But standard layout: 0 Flags,4 Time,8 MajorV,10 MinorV,12 NameRVA,16 OrdBase,20 NumFuncs,24 NumNames,28 AddrFuncs,32 AddrNames,36 AddrNameOrds
+    const ordBase=dv.getUint32(base+16,true);
+    const numFuncs=dv.getUint32(base+20,true);
+    const numNames=dv.getUint32(base+24,true);
+    const afRVA=dv.getUint32(base+28,true);
+    const anRVA=dv.getUint32(base+32,true);
+    const anoRVA=dv.getUint32(base+36,true);
+    const af=this.rva2off(afRVA), an=this.rva2off(anRVA), ano=this.rva2off(anoRVA);
+    const out=[];
+    // Read all name RVAs + ordinal indices
+    const nameRvas=[]; const nameOrds=[];
+    for(let i=0;i<numNames;i++){
+      nameRvas.push(dv.getUint32(an+i*4,true));
+      nameOrds.push(dv.getUint16(ano+i*2,true));
+    }
+    // Build a map: function-index -> name (only for named exports)
+    const nameByFIdx = new Map();
+    for(let i=0;i<numNames;i++){
+      let nameOff=this.rva2off(nameRvas[i]);
+      let name='';
+      if(nameOff!=null){
+        while(this.u8[nameOff]!==0){ name+=String.fromCharCode(this.u8[nameOff]); nameOff++; if(name.length>256)break; }
+      }
+      nameByFIdx.set(nameOrds[i], name);
+    }
+    // Iterate over ALL functions (numFuncs entries in AddressOfFunctions)
+    for(let fIdx=0; fIdx<numFuncs; fIdx++){
+      const rva=dv.getUint32(af+fIdx*4,true);
+      if(rva===0) continue;  // gap in the table (forwarders leave 0)
+      const name = nameByFIdx.get(fIdx) || null;
+      out.push({name, ordinal: ordBase+fIdx, rva, va: this.imageBase+rva});
+    }
+    return out;
+  }
+  /* ---------- imports ---------- */
+  imports(){
+    const dd=this.dataDirs[1];
+    if(!dd.rva) return [];
+    const base=this.rva2off(dd.rva); if(base==null) return [];
+    const out=[];
+    let off=base;
+    while(true){
+      const iltRVA=this.u32(off); const ts=this.u32(off+4); const fwd=this.u32(off+8); const nameRVA=this.u32(off+12); const iatRVA=this.u32(off+16);
+      if(iltRVA===0 && nameRVA===0) break;
+      let nameOff=this.rva2off(nameRVA);
+      let dllName='';
+      if(nameOff!=null){
+        while(this.u8[nameOff]!==0){ dllName+=String.fromCharCode(this.u8[nameOff]); nameOff++; if(dllName.length>256)break; }
+      }
+      // walk ILT (Import Lookup Table) — 8 bytes per entry on PE32+
+      const lookupTableRVA = iltRVA || iatRVA;
+      const ltOff=this.rva2off(lookupTableRVA);
+      const funcs=[];
+      if(ltOff!=null){
+        let eo=ltOff;
+        while(true){
+          const entry = this.isPE32plus ? this.u64big(eo) : BigInt(this.u32(eo));
+          if(entry===0n) break;
+          let name=null, ordinal=null;
+          const HIGH = this.isPE32plus ? 0x8000000000000000n : 0x80000000n;
+          if(entry & HIGH) {
+            ordinal = Number(entry & 0xFFFFn);
+          } else {
+            let hnOff=this.rva2off(Number(entry & 0x7FFFFFFFn));
+            if(hnOff!=null){
+              const hint=this.u16(hnOff);
+              let n='';
+              let p=hnOff+2;
+              while(this.u8[p]!==0){ n+=String.fromCharCode(this.u8[p]); p++; if(n.length>256)break; }
+              name=n;
+            }
+          }
+          funcs.push({name, ordinal, iat_rva: iatRVA + (eo-ltOff)});
+          eo += this.isPE32plus ? 8 : 4;
+        }
+      }
+      out.push({dll: dllName, count: funcs.length, functions: funcs});
+      off += 20;
+    }
+    return out;
+  }
+  /* ---------- resources (3-level tree walk, same as mun-extractor) ---------- */
+  resources(){
+    const rd=this.dataDirs[2];
+    if(!rd.rva) return [];
+    const base=this.rva2off(rd.rva); if(base==null) return [];
+    const out=[];
+    const readStr=(strOff)=>{
+      const len=this.u16(strOff);
+      let s='';
+      for(let i=0;i<len;i++) s+=String.fromCharCode(this.u16(strOff+2+i*2));
+      return s;
+    };
+    const walk=(off,path,level)=>{
+      const numNamed=this.u16(off+12), numId=this.u16(off+14);
+      const total=numNamed+numId;
+      for(let i=0;i<total;i++){
+        const eo=off+16+i*8;
+        const nameField=this.u32(eo), offsetField=this.u32(eo+4);
+        let key;
+        if(nameField&0x80000000){ key=readStr(base+(nameField&0x7FFFFFFF)); }
+        else key=nameField;
+        if(offsetField&0x80000000){ walk(base+(offsetField&0x7FFFFFFF), path.concat([key]), level+1); }
+        else{
+          const de=base+offsetField;
+          const rva=this.u32(de), size=this.u32(de+4), codepage=this.u32(de+8);
+          const foff=this.rva2off(rva);
+          out.push({type:path[0],name:path[1],lang:key,rva,foff,size,codepage});
+        }
+      }
+    };
+    walk(base,[],0);
+    return out;
+  }
+  blob(r){return this.u8.slice(r.foff,r.foff+r.size)}
+  /* ---------- debug dir (CodeView PDB info) ---------- */
+  debugInfo(){
+    const dd=this.dataDirs[6];
+    if(!dd.rva || !dd.size) return null;
+    const base=this.rva2off(dd.rva);
+    if(base==null) return null;
+    // IMAGE_DEBUG_DIRECTORY (28 bytes):
+    //   0  u32 Characteristics
+    //   4  u32 TimeDateStamp
+    //   8  u16 MajorVersion
+    //   10 u16 MinorVersion
+    //   12 u32 Type            (2 = IMAGE_DEBUG_TYPE_CODEVIEW)
+    //   16 u32 SizeOfData
+    //   20 u32 AddressOfRawData (RVA, may be 0)
+    //   24 u32 PointerToRawData (file offset, may be 0)
+    for(let off=base; off+28<=base+dd.size; off+=28){
+      const type=this.u32(off+12);
+      const size=this.u32(off+16);
+      const rva=this.u32(off+20);
+      const foff=this.u32(off+24);
+      if(type===2){  // CodeView
+        // Prefer file offset if both present (the documented convention)
+        const targetOff = foff || (rva ? this.rva2off(rva) : null);
+        if(targetOff!=null && size>24){
+          const sig=String.fromCharCode(...this.u8.slice(targetOff,targetOff+4));
+          if(sig==='RSDS'){
+            const g1=this.u32(targetOff+4);
+            const g2=this.u16(targetOff+8);
+            const g3=this.u16(targetOff+10);
+            const g4=this.u8.slice(targetOff+12, targetOff+20);
+            const g4hex=[...g4].map(b=>b.toString(16).padStart(2,'0')).join('').toUpperCase();
+            const guid=`${g1.toString(16).padStart(8,'0').toUpperCase()}${g2.toString(16).padStart(4,'0').toUpperCase()}${g3.toString(16).padStart(4,'0').toUpperCase()}${g4hex}`;
+            const age=this.u32(targetOff+20);
+            let pdb='';
+            let p=targetOff+24;
+            while(p<this.u8.length && this.u8[p]!==0){ pdb+=String.fromCharCode(this.u8[p]); p++; if(pdb.length>260)break; }
+            const symUrl=`https://msdl.microsoft.com/download/symbols/${pdb.toLowerCase()}/${guid}${age.toString(16).toUpperCase()}/${pdb}`;
+            return {pdb, guid, age, sym_url: symUrl};
+          }
+        }
+      }
+    }
+    return null;
+  }
+  /* ---------- Authenticode signature ---------- */
+  authenticode(){
+    const sd=this.dataDirs[4];
+    if(!sd.rva || !sd.size) return null;
+    // For Security dir, rva is actually a file offset (the documented exception)
+    const off=sd.rva;
+    if(off+8>this.buf.byteLength) return null;
+    const len=this.u32(off);
+    const rev=this.u16(off+4);
+    const type=this.u16(off+6);
+    const pkcs7=this.u8.slice(off+8, off+len);
+    return {size:sd.size, length:len, revision:rev, type, pkcs7};
+  }
+  /* ---------- Load config (SecurityCookie + GuardCF pointers) ---------- */
+  loadConfig(){
+    const dd=this.dataDirs[10];
+    if(!dd.rva || !dd.size) return null;
+    const off=this.rva2off(dd.rva);
+    if(off==null) return null;
+    const u64q=(o)=>this.u32(o) | (this.u32(o+4)>>>0)*0x100000000;
+    const out={rva:dd.rva, size:dd.size};
+    if(dd.size>=0x60) out.security_cookie = u64q(off+0x58);
+    if(dd.size>=0x80){
+      out.guard_cf_check_function_pointer = u64q(off+0x70);
+      out.guard_cf_dispatch_function_pointer = u64q(off+0x78);
+      out.guard_cf_function_table = u64q(off+0x80);
+      out.guard_cf_function_count = u64q(off+0x88);
+    }
+    return out;
+  }
+  /* ---------- CFG targets (GuardCFFunctionTable) ---------- */
+  cfgTargets(){
+    const lc=this.loadConfig();
+    if(!lc || lc.guard_cf_function_table===undefined) return [];
+    const tableRVA = lc.guard_cf_function_table - this.imageBase;
+    const count = lc.guard_cf_function_count;
+    const off=this.rva2off(tableRVA);
+    if(off==null) return [];
+    const out=[];
+    for(let i=0;i<count && off+i*4+4<=this.buf.byteLength;i++){
+      const e=this.u32(off+i*4);
+      out.push({rva: e & ~0x3, flags: e & 0x3,
+                export_suppressed: !!(e&1), delay_load_iat: !!(e&2),
+                va: this.imageBase + (e & ~0x3)});
+    }
+    return out;
+  }
+  /* ---------- Exception table (.pdata) ---------- */
+  exceptionTable(){
+    const dd=this.dataDirs[3];
+    if(!dd.rva || !dd.size) return [];
+    const off=this.rva2off(dd.rva);
+    if(off==null) return [];
+    const out=[];
+    const n=Math.floor(dd.size/12);
+    for(let i=0;i<n;i++){
+      const o=off+i*12;
+      const start=this.u32(o), end=this.u32(o+4), unwind=this.u32(o+8);
+      if(start===0) break;
+      out.push({start_rva: start, end_rva: end, unwind_info_rva: unwind,
+                va: this.imageBase+start, size: end-start});
+    }
+    return out;
+  }
+}
+
+/* ============================================================
+   helpers
+   ============================================================ */
+function fmtSize(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(2)+' MB'}
+function hex(n){return '0x'+n.toString(16)}
+function hexdump(u8,n=192){
+  let s='';
+  for(let i=0;i<Math.min(n,u8.length);i+=16){
+    let line=i.toString(16).padStart(8,'0')+'  ';
+    for(let j=0;j<16;j++){line+= i+j<u8.length?u8[i+j].toString(16).padStart(2,'0')+' ':'   ';}
+    line+=' ';
+    for(let j=0;j<16&&i+j<u8.length;j++){const c=u8[i+j];line+= c>=32&&c<127?String.fromCharCode(c):'.';}
+    s+=line+'\n';
+  }
+  if(u8.length>n)s+='… ('+fmtSize(u8.length)+' total)\n';
+  return s;
+}
+function download(name, blobOrU8, mime='application/octet-stream'){
+  const blob=blobOrU8 instanceof Blob?blobOrU8:new Blob([blobOrU8],{type:mime});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
+}
+
+/* ============================================================
+   UI state
+   ============================================================ */
+let PE_=null, CURRENT_FILE='';
+let TAB='header';
+let FILTER='', ACTIVE_PREFIX=null;
+let RENDERED=0;
+const PAGE=400;
+
+const TABS=[
+  {id:'header', label:'PE Header'},
+  {id:'sections', label:'Sections', count:()=>PE_.sections.length},
+  {id:'exports', label:'Exports', count:()=>0},  // filled after parse
+  {id:'imports', label:'Imports', count:()=>0},
+  {id:'pdb', label:'PDB'},
+  {id:'security', label:'Authenticode'},
+  {id:'cfg', label:'CFG Targets', count:()=>0},
+  {id:'exceptions', label:'Exceptions', count:()=>0},
+  {id:'resources', label:'Resources', count:()=>0},
+];
+
+const drop=document.getElementById('drop'), fileIn=document.getElementById('file');
+drop.onclick=()=>fileIn.click();
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('hover')};
+drop.ondragleave=()=>drop.classList.remove('hover');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('hover');if(e.dataTransfer.files[0])load(e.dataTransfer.files[0])};
+fileIn.onchange=()=>{if(fileIn.files[0])load(fileIn.files[0])};
+
+let EXPORTS_CACHE=[], IMPORTS_CACHE=[], CFG_CACHE=[], EXC_CACHE=[], RES_CACHE=[];
+
+async function load(f){
+  const buf=await f.arrayBuffer();
+  let pe;
+  try{ pe=new PE(buf); }
+  catch(e){ alert('Parse failed: '+e.message); return; }
+  PE_=pe; CURRENT_FILE=f.name;
+  EXPORTS_CACHE=pe.exports(); IMPORTS_CACHE=pe.imports();
+  CFG_CACHE=pe.cfgTargets(); EXC_CACHE=pe.exceptionTable(); RES_CACHE=pe.resources();
+  renderFileInfo(f);
+  renderTabs();
+  TAB='header';
+  rerender();
+}
+
+function renderFileInfo(f){
+  const fi=document.getElementById('fileinfo');
+  const pe=PE_;
+  const mach={0x8664:'x86-64',0x14c:'x86',0xAA64:'ARM64'}[pe.machine]||hex(pe.machine);
+  const subsys={1:'NATIVE (kernel)',2:'GUI',3:'CUI',9:'EFI_APPLICATION',
+                10:'EFI_BOOT_SERVICE_DRIVER',11:'EFI_RUNTIME_DRIVER',12:'EFI_ROM'}[pe.subsystem]||pe.subsystem;
+  const isDll=!!(pe.characteristics&0x2000);
+  fi.style.display='block';
+  fi.innerHTML=`
+    <div><span class="k">${f.name}</span> — ${fmtSize(f.size)} ·
+      PE${pe.isPE32plus?'+32':'32'} ${mach} ·
+      subsystem ${subsys}${isDll?' · DLL':''} ·
+      ImageBase ${hex(pe.imageBase)} ·
+      EntryPoint RVA ${hex(pe.entryPoint)} ·
+      ${pe.numSections} sections</div>
+    <div class="kpis">
+      <div class="kpi"><div class="v">${pe.numSections}</div><div class="l">sections</div></div>
+      <div class="kpi"><div class="v">${EXPORTS_CACHE.length}</div><div class="l">exports</div></div>
+      <div class="kpi"><div class="v">${IMPORTS_CACHE.length}<small> DLLs</small></div><div class="l">imports</div></div>
+      <div class="kpi"><div class="v">${CFG_CACHE.length}</div><div class="l">CFG targets</div></div>
+      <div class="kpi"><div class="v">${EXC_CACHE.length}</div><div class="l">exceptions</div></div>
+      <div class="kpi"><div class="v">${RES_CACHE.length}</div><div class="l">resources</div></div>
+    </div>`;
+}
+
+function renderTabs(){
+  const wrap=document.getElementById('tabs');
+  wrap.style.display='flex';
+  const counts={sections:PE_.sections.length, exports:EXPORTS_CACHE.length,
+                 imports:IMPORTS_CACHE.length, cfg:CFG_CACHE.length,
+                 exceptions:EXC_CACHE.length, resources:RES_CACHE.length};
+  wrap.innerHTML=TABS.map(t=>{
+    const c=counts[t.id];
+    return `<div class="tab ${t.id===TAB?'on':''}" data-tab="${t.id}">${t.label}${c!==undefined?`<span class="n">${c}</span>`:''}</div>`;
+  }).join('');
+  wrap.querySelectorAll('.tab').forEach(el=>{
+    el.onclick=()=>{TAB=el.dataset.tab; FILTER=''; ACTIVE_PREFIX=null; renderTabs(); rerender();};
+  });
+}
+
+function rerender(){
+  const body=document.getElementById('tabBody');
+  body.innerHTML='';
+  if(TAB==='header') renderHeaderTab(body);
+  else if(TAB==='sections') renderSectionsTab(body);
+  else if(TAB==='exports') renderExportsTab(body);
+  else if(TAB==='imports') renderImportsTab(body);
+  else if(TAB==='pdb') renderPdbTab(body);
+  else if(TAB==='security') renderSecurityTab(body);
+  else if(TAB==='cfg') renderCfgTab(body);
+  else if(TAB==='exceptions') renderExcTab(body);
+  else if(TAB==='resources') renderResourcesTab(body);
+}
+
+/* ----- PE Header tab ----- */
+function renderHeaderTab(body){
+  const pe=PE_;
+  const dirs=['Export','Import','Resource','Exception','Security','BaseReloc','Debug','Arch','GlobalPtr','TLS','LoadConfig','BoundImport','IAT','DelayImport','COM','Reserved'];
+  let html=`<div class="panel"><h3 style="margin-bottom:10px">Data Directories</h3><table class="t"><thead><tr><th>#</th><th>name</th><th>RVA</th><th>size</th></tr></thead><tbody>`;
+  for(let i=0;i<16;i++){
+    const d=pe.dataDirs[i];
+    if(d.rva||d.size){
+      html+=`<tr><td class="n">${i}</td><td>${dirs[i]}</td><td class="a">${hex(d.rva)}</td><td>${fmtSize(d.size)}</td></tr>`;
+    }
+  }
+  html+=`</tbody></table></div>`;
+  body.innerHTML=html;
+}
+
+/* ----- Sections tab ----- */
+function renderSectionsTab(body){
+  const pe=PE_;
+  let html=`<div class="panel"><table class="t"><thead><tr><th>#</th><th>name</th><th>VA</th><th>vsize</th><th>rsize</th><th>rptr</th><th>flags</th></tr></thead><tbody>`;
+  pe.sections.forEach((s,i)=>{
+    const fl=[];
+    if(s.chars&0x20)fl.push('<span class="fl code">CODE</span>');
+    if(s.chars&0x40)fl.push('<span class="fl">IDATA</span>');
+    if(s.chars&0x80)fl.push('<span class="fl">UDATA</span>');
+    if(s.chars&0x20000000)fl.push('<span class="fl exec">EXEC</span>');
+    if(s.chars&0x40000000)fl.push('<span class="fl read">READ</span>');
+    if(s.chars&0x80000000)fl.push('<span class="fl write">WRITE</span>');
+    if(s.chars&0x02000000)fl.push('<span class="fl discard">DISCARD</span>');
+    if(s.chars&0x08000000)fl.push('<span class="fl notpage">NOT_PAGED</span>');
+    html+=`<tr><td class="n">${i}</td><td class="a">${s.name}</td><td>${hex(pe.imageBase+s.va)}</td><td>${fmtSize(s.vsize)}</td><td>${fmtSize(s.rsize)}</td><td class="n">${hex(s.rptr)}</td><td>${fl.join('')}</td></tr>`;
+  });
+  html+=`</tbody></table></div>`;
+  body.innerHTML=html;
+}
+
+/* ----- Exports tab (virtualized + filter + prefix chips) ----- */
+function renderExportsTab(body){
+  // Build prefix counts once
+  if(!renderExportsTab._prefixes){
+    const p={};
+    for(const e of EXPORTS_CACHE){
+      if(!e.name) continue;
+      const pf=e.name.includes('_')?e.name.split('_')[0]:e.name.slice(0,2);
+      p[pf]=(p[pf]||0)+1;
+    }
+    renderExportsTab._prefixes=Object.entries(p).sort((a,b)=>b[1]-a[1]).slice(0,30);
+  }
+  const prefixes=renderExportsTab._prefixes;
+  body.innerHTML=`
+    <div class="searchrow">
+      <input id="filter" placeholder="filter by name, RVA, ordinal…" value="${FILTER}">
+      <button id="dlExports">⬇ Download exports.json</button>
+    </div>
+    <div class="prefixes"><span style="color:var(--muted);font-size:11.5px">prefix:</span>
+      ${prefixes.map(([p,c])=>`<span class="chip ${ACTIVE_PREFIX===p?'on':''}" data-pfx="${p}">${p}<span class="n">${c}</span></span>`).join('')}
+    </div>
+    <div class="panel" style="margin-top:10px;padding:0;overflow:hidden">
+      <table class="t"><thead><tr><th>#</th><th>name</th><th>ordinal</th><th>RVA</th><th>VA</th></tr></thead>
+      <tbody id="exportsBody"></tbody></table>
+    </div>
+    <button id="loadMore" style="display:none;margin:14px auto">Load more…</button>
+  `;
+  document.getElementById('filter').oninput=e=>{FILTER=e.target.value.toLowerCase();RENDERED=0;renderExportsList();};
+  document.getElementById('dlExports').onclick=()=>{
+    download(CURRENT_FILE.replace(/\.[^.]+$/,'')+'_exports.json',
+             JSON.stringify(EXPORTS_CACHE,null,2),'application/json');
+  };
+  body.querySelectorAll('.chip').forEach(c=>{
+    c.onclick=()=>{
+      const p=c.dataset.pfx;
+      ACTIVE_PREFIX = ACTIVE_PREFIX===p ? null : p;
+      body.querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x.dataset.pfx===ACTIVE_PREFIX));
+      RENDERED=0; renderExportsList();
+    };
+  });
+  RENDERED=0;
+  renderExportsList();
+}
+function visibleExports(){
+  return EXPORTS_CACHE.filter(e=>{
+    if(ACTIVE_PREFIX){
+      const pf=e.name&&e.name.includes('_')?e.name.split('_')[0]:e.name&&e.name.slice(0,2);
+      if(pf!==ACTIVE_PREFIX) return false;
+    }
+    if(FILTER){
+      const hay=`${e.name||''} ${e.ordinal} ${hex(e.rva)} ${hex(e.va)}`.toLowerCase();
+      if(!FILTER.split(/\s+/).every(w=>hay.includes(w))) return false;
+    }
+    return true;
+  });
+}
+function renderExportsList(){
+  const body=document.getElementById('exportsBody');
+  if(!body) return;
+  const list=visibleExports();
+  const next=Math.min(RENDERED+PAGE,list.length);
+  let html='';
+  for(let i=RENDERED;i<next;i++){
+    const e=list[i];
+    html+=`<tr><td class="n">${i+1}</td><td>${e.name||`<span class="n">Ord_${e.ordinal}</span>`}</td><td class="n">${e.ordinal}</td><td class="a">${hex(e.rva)}</td><td class="n">${hex(e.va)}</td></tr>`;
+  }
+  if(RENDERED===0) body.innerHTML=html;
+  else body.insertAdjacentHTML('beforeend',html);
+  RENDERED=next;
+  const btn=document.getElementById('loadMore');
+  if(btn) btn.style.display=RENDERED<list.length?'block':'none';
+  btn&&(btn.onclick=()=>renderExportsList());
+  const count=document.querySelector('#exportsBody')?.parentElement?.parentElement?.previousElementSibling;
+}
+
+/* ----- Imports tab ----- */
+function renderImportsTab(body){
+  let html='';
+  for(const imp of IMPORTS_CACHE){
+    html+=`<div class="panel"><h3 style="margin-bottom:8px">${imp.dll} <span style="color:var(--muted);font-weight:400;font-size:12px">— ${imp.count} function(s)</span></h3>
+      <table class="t"><thead><tr><th>#</th><th>name</th><th>ordinal</th><th>IAT RVA</th></tr></thead><tbody>`;
+    imp.functions.forEach((f,i)=>{
+      html+=`<tr><td class="n">${i+1}</td><td>${f.name||`<span class="n">Ord_${f.ordinal}</span>`}</td><td class="n">${f.ordinal!==null?f.ordinal:'—'}</td><td class="a">${f.iat_rva!==undefined?hex(f.iat_rva):'—'}</td></tr>`;
+    });
+    html+=`</tbody></table></div>`;
+  }
+  body.innerHTML=html;
+}
+
+/* ----- PDB / Debug tab ----- */
+function renderPdbTab(body){
+  const dbg=PE_.debugInfo();
+  if(!dbg){ body.innerHTML='<div class="placeholder">No CodeView debug info in this PE.</div>'; return; }
+  body.innerHTML=`<div class="panel">
+    <h3 style="margin-bottom:10px">CodeView Debug Information</h3>
+    <div class="kv">
+      <div class="k">PDB filename</div><div class="v">${dbg.pdb}</div>
+      <div class="k">GUID</div><div class="v">${dbg.guid}</div>
+      <div class="k">Age</div><div class="v">${dbg.age}</div>
+      <div class="k">Symbol-server URL</div><div class="v"><a href="${dbg.sym_url}" target="_blank">${dbg.sym_url}</a></div>
+    </div>
+    <p style="color:var(--muted);font-size:12px;margin-top:14px;line-height:1.6">
+      Click the URL above to download the matching <code>${dbg.pdb}</code> from the public Microsoft Symbol Server.
+      To extract full public symbols afterwards, use Microsoft's <code>symchk.exe</code> or
+      <code>dbghelp.dll</code>, or LLVM's <code>llvm-pdbutil</code>. The PDB GUID + Age together uniquely
+      identify the exact build; the same PDB filename with a different GUID is a different binary.
+    </p>
+    <button onclick="download('${(dbg.pdb).replace(/'/g,"\\'")}.guid.txt','PDB: ${dbg.pdb}\\nGUID: ${dbg.guid}\\nAge: ${dbg.age}\\nURL: ${dbg.sym_url}\\n','text/plain')" style="margin-top:8px">⬇ Save as text</button>
+  </div>`;
+}
+
+/* ----- Authenticode / Security tab ----- */
+function renderSecurityTab(body){
+  const sig=PE_.authenticode();
+  if(!sig){ body.innerHTML='<div class="placeholder">No embedded Authenticode signature in this PE.</div>'; return; }
+  body.innerHTML=`<div class="panel">
+    <h3 style="margin-bottom:10px">Authenticode Signature</h3>
+    <div class="kv">
+      <div class="k">WIN_CERTIFICATE size</div><div class="v">${sig.size.toLocaleString()} bytes</div>
+      <div class="k">length field</div><div class="v">${sig.length.toLocaleString()}</div>
+      <div class="k">revision</div><div class="v">0x${sig.revision.toString(16).padStart(4,'0')} ${sig.revision===0x200?'(WIN_CERT_REVISION_2_0 ✓)':''}</div>
+      <div class="k">certificate type</div><div class="v">0x${sig.type.toString(16).padStart(4,'0')} ${sig.type===2?'(PKCS#7 ✓)':''}</div>
+      <div class="k">PKCS#7 payload</div><div class="v">${sig.pkcs7.length.toLocaleString()} bytes (DER)</div>
+    </div>
+    <p style="color:var(--muted);font-size:12px;margin-top:14px;line-height:1.6">
+      The PKCS#7 blob is a signed ASN.1 structure containing the certificate chain
+      (leaf + intermediates) and the message digest. To inspect the cert chain
+      offline, run <code>openssl pkcs7 -inform DER -in file.p7b -print_certs</code>.
+      The leaf cert's subject identifies the signer; the root CA must be trusted by
+      Windows for the signature to validate.
+    </p>
+    <div style="margin-top:14px">
+      <button onclick="download('${CURRENT_FILE.replace(/\.[^.]+$/,'')}_authenticode.p7b',PE_.authenticode().pkcs7,'application/pkcs7-mime')">⬇ Download .p7b (DER)</button>
+      <button id="parseCerts" onclick="parseCerts()">▶ Parse cert chain</button>
+    </div>
+    <div id="certChain" style="margin-top:14px"></div>
+    <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--accent);font-size:12px">PKCS#7 hexdump (first 384 bytes)</summary>
+      <pre class="hexbox" style="margin-top:6px">${hexdump(sig.pkcs7,384)}</pre></details>
+  </div>`;
+}
+// Parse PKCS#7 in-browser — extract only printable cert subject strings
+window.parseCerts=function(){
+  const chain=document.getElementById('certChain');
+  chain.innerHTML='<span class="spin"></span>Parsing ASN.1…';
+  const sig=PE_.authenticode();
+  const u8=sig.pkcs7;
+  try{
+    // Walk every ASN.1 string tag (0x13=PrintableString, 0x0C=UTF8String, 0x16=IA5String,
+    // 0x14=T61String). Each cert's subject DN contains CN=, O=, C=, ST=, L= attribute values.
+    const found=[];
+    for(let i=0;i<u8.length-4;i++){
+      if(u8[i]===0x13||u8[i]===0x0c||u8[i]===0x16||u8[i]===0x14){
+        const len=u8[i+1];
+        if(len>=6 && len<200 && i+2+len<=u8.length){
+          // Try to decode as ASCII; reject if any control chars / non-printables
+          let s='';
+          let ok=true;
+          for(let j=0;j<len;j++){
+            const c=u8[i+2+j];
+            if(c<32||c>126){ ok=false; break; }
+            s+=String.fromCharCode(c);
+          }
+          if(ok && /Microsoft|Windows|Corporation|Authority|Service|Time-Stamp|Operations|Ireland|Redmond|Washington/i.test(s)
+             && !/[?={}\\\/]/.test(s) && s.length>4){
+            found.push(s);
+          }
+        }
+      }
+    }
+    // De-dup adjacent duplicates and noisy duplicates
+    const seen=new Set(); const out=[];
+    for(const s of found){
+      if(!seen.has(s)){ seen.add(s); out.push(s); }
+    }
+    // Filter out obviously broken entries (URL fragments, hex strings)
+    const clean=out.filter(s => !s.startsWith('http') && !/^[\x00-\x1f]/.test(s) && s.length>=8);
+    // Determine role: first clean subject is the leaf signer; last is the root CA
+    let html='<h4 style="margin-bottom:8px;color:var(--accent)">Certificate subjects (extracted from PKCS#7)</h4>';
+    if(clean.length===0){
+      html+='<p style="color:var(--warn)">No readable subject strings found. Download the .p7b and inspect with <code>openssl pkcs7 -inform DER -in file.p7b -print_certs</code>.</p>';
+    }else{
+      clean.forEach((s,i)=>{
+        const role = i===0 ? 'leaf signer' : (i===clean.length-1 ? 'root CA' : 'intermediate / timestamp CA');
+        const cls = i===0 ? 'good' : (i===clean.length-1 ? 'w' : '');
+        html+=`<div class="cert"><div class="subject">${s}</div><div class="issuer">role: <span class="${cls}">${role}</span></div></div>`;
+      });
+      html+='<p style="color:var(--muted);font-size:11px;margin-top:8px">Note: in-browser parsing is a quick scan of ASN.1 string fields. For the full certificate details (issuer/subject/validity/serial/extensions), use <code>openssl pkcs7 -inform DER -in file.p7b -print_certs</code> on the downloaded .p7b file.</p>';
+    }
+    chain.innerHTML=html;
+  }catch(e){ chain.innerHTML='<div style="color:var(--warn)">Parse failed: '+e.message+'</div>'; }
+};
+
+/* ----- CFG tab ----- */
+function renderCfgTab(body){
+  const lc=PE_.loadConfig();
+  if(!lc||!CFG_CACHE.length){
+    body.innerHTML='<div class="placeholder">No Control Flow Guard data in this PE.</div>';
+    return;
+  }
+  body.innerHTML=`
+    <div class="panel">
+      <h3 style="margin-bottom:10px">Control Flow Guard (CFG)</h3>
+      <div class="kv">
+        <div class="k">SecurityCookie</div><div class="v">${hex(lc.security_cookie)}</div>
+        <div class="k">GuardCFCheckFunctionPointer</div><div class="v">${hex(lc.guard_cf_check_function_pointer)}</div>
+        <div class="k">GuardCFDispatchFunctionPointer</div><div class="v">${hex(lc.guard_cf_dispatch_function_pointer)}</div>
+        <div class="k">GuardCFFunctionTable</div><div class="v">${hex(lc.guard_cf_function_table)}</div>
+        <div class="k">GuardCFFunctionCount</div><div class="v">${lc.guard_cf_function_count.toLocaleString()}</div>
+      </div>
+      <p style="color:var(--muted);font-size:12px;margin-top:14px;line-height:1.6">
+        The GuardCFFunctionTable lists every RVA that is a <b>valid indirect call target</b> —
+        i.e. the only addresses that may be reached via a function pointer. Calls to any
+        address NOT in this table trigger a fast-fail (UNWIND/BREAK) at runtime. The low
+        2 bits of each entry are flags: bit 0 = export-suppressed, bit 1 = delay-load IAT.
+        For ntoskrnl.exe this lists ${CFG_CACHE.length.toLocaleString()} functions — every
+        kernel export is a valid CFG target, plus many internal helper routines.
+      </p>
+      <div style="margin-top:10px"><button onclick="download('${CURRENT_FILE.replace(/\.[^.]+$/,'')}_cfg_targets.json',JSON.stringify(CFG_CACHE,null,2),'application/json')">⬇ Download cfg_targets.json</button></div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h4 style="margin-bottom:8px">First 50 CFG targets</h4>
+      <table class="t"><thead><tr><th>#</th><th>RVA</th><th>VA</th><th>flags</th></tr></thead><tbody>
+      ${CFG_CACHE.slice(0,50).map((t,i)=>`<tr><td class="n">${i+1}</td><td class="a">${hex(t.rva)}</td><td class="n">${hex(t.va)}</td><td>${t.flags?'<span class="c">'+t.flags+'</span>':'0'}</td></tr>`).join('')}
+      </tbody></table>
+      ${CFG_CACHE.length>50?`<p style="color:var(--muted);font-size:11px;margin-top:6px">… and ${(CFG_CACHE.length-50).toLocaleString()} more — download JSON for full list.</p>`:''}
+    </div>
+  `;
+}
+
+/* ----- Exceptions tab ----- */
+function renderExcTab(body){
+  body.innerHTML=`
+    <div class="panel">
+      <h3 style="margin-bottom:10px">x64 Exception Unwind Table (.pdata)</h3>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:12px;line-height:1.6">
+        The .pdata section contains <code>RUNTIME_FUNCTION</code> entries — one per
+        function — used by x64 SEH (structured exception handling) for stack unwinding.
+        Each entry is 12 bytes: <code>{ start_rva, end_rva, unwind_info_rva }</code>.
+        For ntoskrnl.exe this lists ${EXC_CACHE.length.toLocaleString()} functions (close to
+        the actual count of internal kernel routines — far more than the ${EXPORTS_CACHE.length.toLocaleString()} exports).
+      </p>
+      <button onclick="download('${CURRENT_FILE.replace(/\.[^.]+$/,'')}_exception_table.json',JSON.stringify(EXC_CACHE,null,2),'application/json')">⬇ Download full table</button>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h4 style="margin-bottom:8px">First 50 RUNTIME_FUNCTION entries</h4>
+      <table class="t"><thead><tr><th>#</th><th>start RVA</th><th>end RVA</th><th>size</th><th>unwind RVA</th></tr></thead><tbody>
+      ${EXC_CACHE.slice(0,50).map((e,i)=>`<tr><td class="n">${i+1}</td><td class="a">${hex(e.start_rva)}</td><td class="n">${hex(e.end_rva)}</td><td>${e.size}</td><td class="n">${hex(e.unwind_info_rva)}</td></tr>`).join('')}
+      </tbody></table>
+    </div>
+  `;
+}
+
+/* ----- Resources tab (simple, reuses proven decoder) ----- */
+const RT={1:'CURSOR',2:'BITMAP',3:'ICON',4:'MENU',5:'DIALOG',6:'STRING',7:'FONTDIR',8:'FONT',9:'ACCEL',10:'RCDATA',11:'MESSAGETABLE',12:'GROUP_CURSOR',14:'GROUP_ICON',16:'VERSION',24:'MANIFEST'};
+function resTypeName(t){ return (typeof t==='number'&&RT[t])||String(t); }
+function sniffRes(u8,t){
+  if(t===14)return 'GROUP_ICON'; if(t===3)return 'ICON_DIB'; if(t===2)return 'BITMAP_DIB';
+  if(t===16)return 'VERSION'; if(t===24)return 'MANIFEST'; if(t===11)return 'MESSAGETABLE';
+  if(t===10)return 'RCDATA';
+  if(u8.length>=8 && u8[0]===0x89 && u8[1]===0x50 && u8[2]===0x4E && u8[3]===0x47) return 'PNG';
+  if(u8.length>=3 && u8[0]===0xFF && u8[1]===0xD8 && u8[2]===0xFF) return 'JPEG';
+  if(u8.length>=2 && u8[0]===0x42 && u8[1]===0x4D) return 'BMP';
+  return 'UNKNOWN';
+}
+function renderResourcesTab(body){
+  if(!RES_CACHE.length){ body.innerHTML='<div class="placeholder">No resources in this PE.</div>'; return; }
+  body.innerHTML=`<div class="panel"><table class="t"><thead><tr><th>type</th><th>name</th><th>lang</th><th>RVA</th><th>size</th><th>format</th><th>action</th></tr></thead><tbody>
+    ${RES_CACHE.map((r,i)=>{
+      const u8=PE_.blob(r); const f=sniffRes(u8,r.type);
+      const t=resTypeName(r.type);
+      return `<tr><td class="a">${t}</td><td>${r.name}</td><td class="n">${r.lang}</td><td class="n">${hex(r.rva)}</td><td>${fmtSize(r.size)}</td><td><span class="fl">${f}</span></td>
+        <td><button onclick="download('${t}_${r.name}.${f==='PNG'?'png':f==='JPEG'?'jpeg':f==='GROUP_ICON'?'ico':'bin'}',PE_.resources()[${i}].foff!==undefined?PE_.u8.slice(PE_.resources()[${i}].foff,PE_.resources()[${i}].foff+PE_.resources()[${i}].size):new Uint8Array())">⬇</button></td></tr>`;
+    }).join('')}
+  </tbody></table></div>`;
+}
+</script>
+</body>
+</html>
